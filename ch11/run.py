@@ -88,7 +88,7 @@ class LunaTrainingApp:
 
 
     def train_data_loader(self):
-        train_dataset = Lunadataset(val_stride=10, isValSet_bool = None)
+        train_dataset = Lunadataset(val_stride=10, isValSet_bool = False)
         batch_size = self.cli_args.batch_size
         if self.use_cuda:
             batch_size = batch_size*torch.cuda.device_count()
@@ -104,7 +104,7 @@ class LunaTrainingApp:
 
 
     def val_data_loader(self):
-        val_dataset = Lunadataset(val_stride=10, isValSet_bool = None)
+        val_dataset = Lunadataset(val_stride=10, isValSet_bool = True)
         batch_size = self.cli_args.batch_size
         if self.use_cuda:
             batch_size = batch_size*torch.cuda.device_count()
@@ -117,6 +117,14 @@ class LunaTrainingApp:
         )
 
         return val_dataloader
+    
+    def main(self):
+        #log
+        train_dl = self.train_data_loader
+        val_dl = self.val_data_loader
+
+        for epoch_ndx in range(1, self.cli_args.epochs +1):
+            
 
 
 

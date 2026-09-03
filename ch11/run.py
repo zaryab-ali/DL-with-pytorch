@@ -5,6 +5,11 @@ import torch
 
 from util.util import enumerateWithEstimate
 
+import os
+import numpy as np
+
+from torch.utils.tensorboard import SummaryWriter
+
 from torch.optim import SGD, Adam
 
 from torch import nn
@@ -71,7 +76,7 @@ class LunaTrainingApp:
 
         self.trn_writer = None
         self.val_writer = None
-        self.total_training_sample_count = 0
+        self.totalTrainingSamples_count = 0
 
 
         self.use_cuda = torch.cuda.is_available()
@@ -124,7 +129,16 @@ class LunaTrainingApp:
         )
 
         return val_dataloader
-    
+
+    def initTensorboardWriters(self):
+        if self.trn_writer is None:
+            log_dir = os.path.join('runs', self.cli_args.tb_prefix, self.time_str)
+
+            self.trn_writer = SummaryWriter(
+                log_dir=log_dir + '-trn_cls-' + self.cli_args.comment)
+            self.val_writer = SummaryWriter(
+                log_dir=log_dir + '-val_cls-' + self.cli_args.comment)
+
     def main(self):
         #log
         train_dl = self.train_data_loader
@@ -222,8 +236,108 @@ class LunaTrainingApp:
 
 
 
+    def log_metrics(
+            self,
+            epoch_ndx,
+            mode_str,
+            metrics_t,
+            classificationThreshold=0.5,
+    ):
+        self.initTensorboardWriters()
+        log.info("E{} {}".format(
+            epoch_ndx,
+            type(self).__name__,
+        ))
 
-    def log_metrics(self, *args):
+        negLabel_mask = metrics_t[METRICS_LABEL_NDX] <= classificationThreshold
+        negPred_mask = metrics_t[METRICS_PRED_NDX] <= classificationThreshold
+
+        posLabel_mask = ~negLabel_mask
+        posPred_mask = ~negPred_mask
+
+        neg_count = int(negLabel_mask.sum())
+        pos_count = int(posLabel_mask.sum())
+
+        neg_correct = int((negLabel_mask & negPred_mask).sum())
+        pos_correct = int((posLabel_mask & posPred_mask).sum())
+
+        metrics_dict = {}
+        metrics_dict['loss/all'] = \
+            metrics_t[METRICS_LOSS_NDX].mean()
+        metrics_dict['loss/neg'] = \
+            metrics_t[METRICS_LOSS_NDX, negLabel_mask].mean()
+        metrics_dict['loss/pos'] = \
+            metrics_t[METRICS_LOSS_NDX, posLabel_mask].mean()
+
+        metrics_dict['correct/all'] = (pos_correct + neg_correct) \
+            / np.float32(metrics_t.shape[1]) * 100
+        metrics_dict['correct/neg'] = neg_correct / np.float32(neg_count) * 100
+        metrics_dict['correct/pos'] = pos_correct / np.float32(pos_count) * 100
+
+        log.info(
+            ("E{} {:8} {loss/all:.4f} loss, "
+                 + "{correct/all:-5.1f}% correct, "
+            ).format(
+                epoch_ndx,
+                mode_str,
+                **metrics_dict,
+            )
+        )
+        log.info(
+            ("E{} {:8} {loss/neg:.4f} loss, "
+                 + "{correct/neg:-5.1f}% correct ({neg_correct:} of {neg_count:})"
+            ).format(
+                epoch_ndx,
+                mode_str + '_neg',
+                neg_correct=neg_correct,
+                neg_count=neg_count,
+                **metrics_dict,
+            )
+        )
+        log.info(
+            ("E{} {:8} {loss/pos:.4f} loss, "
+                 + "{correct/pos:-5.1f}% correct ({pos_correct:} of {pos_count:})"
+            ).format(
+                epoch_ndx,
+                mode_str + '_pos',
+                pos_correct=pos_correct,
+                pos_count=pos_count,
+                **metrics_dict,
+            )
+        )
+
+        writer = getattr(self, mode_str + '_writer')
+
+        for key, value in metrics_dict.items():
+            writer.add_scalar(key, value, self.totalTrainingSamples_count)
+
+        writer.add_pr_curve(
+            'pr',
+            metrics_t[METRICS_LABEL_NDX],
+            metrics_t[METRICS_PRED_NDX],
+            self.totalTrainingSamples_count,
+        )
+
+        bins = [x/50.0 for x in range(51)]
+
+        negHist_mask = negLabel_mask & (metrics_t[METRICS_PRED_NDX] > 0.01)
+        posHist_mask = posLabel_mask & (metrics_t[METRICS_PRED_NDX] < 0.99)
+
+        if negHist_mask.any():
+            writer.add_histogram(
+                'is_neg',
+                metrics_t[METRICS_PRED_NDX, negHist_mask],
+                self.totalTrainingSamples_count,
+                bins=bins,
+            )
+        if posHist_mask.any():
+            writer.add_histogram(
+                'is_pos',
+                metrics_t[METRICS_PRED_NDX, posHist_mask],
+                self.totalTrainingSamples_count,
+                bins=bins,
+            )
+
 
 
 
